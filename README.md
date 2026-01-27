@@ -64,35 +64,9 @@ This metric captures the true execution time considering parallel operations.
 
 ## Installation
 
-### Using Poetry (Recommended)
 
 ```bash
-# Clone the repository
-git clone https://github.com/The-Swarm-Corporation/PARL.git
-cd PARL
-
-# Install dependencies with Poetry
-poetry install
-
-# Activate the virtual environment
-poetry shell
-```
-
-### Using pip
-
-```bash
-# Clone the repository
-git clone https://github.com/The-Swarm-Corporation/PARL.git
-cd PARL
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### From PyPI
-
-```bash
-pip install parl-rl
+pip3 install -U open-parl
 ```
 
 ## Quick Start
