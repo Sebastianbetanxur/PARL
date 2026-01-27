@@ -4,7 +4,9 @@
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 
-Official open-source implementation of **PARL (Parallel-Agent Reinforcement Learning)**, a novel training paradigm that enables AI models to decompose complex tasks into parallel subtasks and coordinate multiple agents simultaneously.
+> **⚠️ Disclaimer**: This is an **open-source community implementation** of PARL (Parallel-Agent Reinforcement Learning) based on the Kimi K2.5 technical report. This is **NOT an official implementation** from Kimi AI or any affiliated organization. This project is maintained independently by The Swarm Corporation and the open-source community.
+
+Open-source implementation of **PARL (Parallel-Agent Reinforcement Learning)**, a novel training paradigm that enables AI models to decompose complex tasks into parallel subtasks and coordinate multiple agents simultaneously.
 
 ## Overview
 
@@ -168,12 +170,14 @@ pytest tests/test_parl.py -v
 
 ## Research Paper
 
-This implementation is based on the technical report:
+This is an **unofficial open-source implementation** based on the technical report:
 
 > **"PARL: Parallel-Agent Reinforcement Learning for Large Language Models"**
 > Kimi AI Research Team, 2026
 
-For technical details and experimental results, see: [Kimi K2.5 Technical Report](https://www.kimi.com/blog/kimi-k2-5.html)
+For technical details and experimental results from the original research, see: [Kimi K2.5 Technical Report](https://www.kimi.com/blog/kimi-k2-5.html)
+
+**Note**: This implementation is not affiliated with, endorsed by, or officially connected to Kimi AI. It is an independent open-source project developed by the community based on publicly available information.
 
 ## Citation
 
@@ -229,9 +233,10 @@ This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENS
 
 ## Acknowledgments
 
-- Inspired by the Kimi K2.5 technical report
+- This is an **unofficial open-source implementation** inspired by the Kimi K2.5 technical report
 - Built on PyTorch's efficient tensor operations
 - Thanks to the open-source ML community
+- This project is not affiliated with or endorsed by Kimi AI
 
 ## Contact
 

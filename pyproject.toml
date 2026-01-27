@@ -35,6 +35,7 @@ classifiers = [
 
 packages = [{include = "parl"}]
 
+
 [tool.poetry.dependencies]
 python = "*"
 torch = "*"
@@ -46,6 +47,7 @@ pytest-cov = "^4.1.0"
 black = "^23.7.0"
 isort = "^5.12.0"
 flake8 = "^6.1.0"
+ruff = "^0.1.0"
 mypy = "^1.5.0"
 pre-commit = "^3.3.0"
 
@@ -143,3 +145,27 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "@abstractmethod",
 ]
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "C",  # flake8-comprehensions
+    "B",  # flake8-bugbear
+    "UP", # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.isort]
+known-third-party = ["torch", "numpy"]
