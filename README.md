@@ -115,33 +115,17 @@ critical_steps = critical_steps_metric(main_steps, sub_steps)
 print(f"Critical Steps: {critical_steps}")
 ```
 
+## Examples
+
+| Example | File | Description | Requirements |
+|---------|------|-------------|-------------|
+| **Basic Usage** | `basic_usage.py` | Core PARL reward function and Critical Steps metric without external models | `open-parl` only |
+| **Quick Start (HF)** | `quickstart_hf.py` | Minimal integration with Hugging Face GLM-4.7-Flash model | `transformers`, `torch`, `accelerate` |
+| **Full HF Integration** | `huggingface_integration.py` | Complete orchestrator class with training loop, batching, and reward analysis | `transformers`, `torch`, `accelerate` |
+
 ## API Reference
 
-### `PARLReward`
-
-Main reward function implementing staged reward shaping.
-
-**Parameters:**
-- `lambda_init` (float): Initial auxiliary reward weight (default: 0.1)
-- `lambda_final` (float): Final auxiliary reward weight (default: 0.0)
-- `total_training_steps` (int): Total training steps for annealing (default: 10000)
-- `device` (str): Device for computation ('cpu' or 'cuda')
-
-**Methods:**
-- `compute_full_reward()`: Compute all reward components
-- `compute_instantiation_reward()`: Calculate parallelism incentive
-- `compute_task_quality()`: Calculate task success quality
-- `anneal_lambda()`: Get current λ_aux value
-
-### `CriticalStepsMetric`
-
-Latency-oriented evaluation metric for parallel execution.
-
-**Parameters:**
-- `orchestration_overhead` (float): Overhead for orchestrator coordination (default: 0.1)
-
-**Methods:**
-- `forward()`: Compute critical steps for parallel workflows
+For detailed API documentation, see [docs/API.md](docs/API.md).
 
 ## Experiments
 
@@ -193,26 +177,7 @@ If you use PARL in your research, please cite:
 }
 ```
 
-## Project Structure
 
-```
-PARL/
-├── parl/
-│   ├── __init__.py         # Package initialization
-│   └── main.py             # Core PARL implementation
-├── tests/
-│   └── test_parl.py        # Comprehensive test suite
-├── pyproject.toml          # Poetry configuration
-├── README.md               # This file
-├── LICENSE                 # Apache 2.0 License
-└── .gitignore              # Git ignore rules
-```
-
-## Requirements
-
-- Python >= 3.8
-- PyTorch >= 2.0.0
-- NumPy >= 1.24.0
 
 ## Contributing
 

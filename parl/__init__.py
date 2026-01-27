@@ -22,7 +22,7 @@ Example:
     >>> print(rewards['total_reward'])
 """
 
-from parl.main import PARLReward, CriticalStepsMetric
+from parl.main import CriticalStepsMetric, PARLReward
 
 __version__ = "0.1.0"
 __author__ = "The Swarm Corporation"

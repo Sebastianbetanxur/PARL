@@ -1,6 +1,6 @@
 import torch
-from parl import PARLReward, CriticalStepsMetric
 
+from parl import CriticalStepsMetric, PARLReward
 
 # Example usage and testing
 if __name__ == "__main__":

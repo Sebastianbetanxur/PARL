@@ -6,7 +6,8 @@ and Critical Steps metric.
 """
 
 import torch
-from parl import PARLReward, CriticalStepsMetric
+
+from parl import CriticalStepsMetric, PARLReward
 
 
 def example_reward_computation():

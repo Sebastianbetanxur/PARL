@@ -11,17 +11,17 @@ Tests cover:
 - Gradient computation and backpropagation
 """
 
-import pytest
-import torch
-from typing import Dict
-
 import sys
 from pathlib import Path
+from typing import Dict
+
+import pytest
+import torch
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from parl.main import PARLReward, CriticalStepsMetric
+from parl.main import CriticalStepsMetric, PARLReward
 
 
 class TestPARLReward:
