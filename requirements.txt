@@ -1,0 +1,11 @@
+# Core dependencies
+torch
+numpy
+
+# Development dependencies (optional)
+pytest
+pytest-cov
+black
+isort
+flake8
+mypy
