@@ -31,7 +31,12 @@ class TestPARLReward:
     def reward_fn(self) -> PARLReward:
         """Create a standard PARLReward instance for testing"""
         return PARLReward(
-            lambda_init=0.1, lambda_final=0.0, total_training_steps=10000, device="cpu"
+            lambda1_init=0.1,
+            lambda1_final=0.0,
+            lambda2_init=0.1,
+            lambda2_final=0.0,
+            total_training_steps=10000,
+            device="cpu",
         )
 
     @pytest.fixture
@@ -39,42 +44,55 @@ class TestPARLReward:
         """Create sample data for testing"""
         batch_size = 8
         feature_dim = 64
+        num_subagents = torch.randint(1, 50, (batch_size,))
+        assigned_subtasks = num_subagents + torch.randint(1, 11, (batch_size,))
+        completed_subtasks = (
+            (assigned_subtasks.float() * torch.rand(batch_size)).long()
+        ).clamp(max=assigned_subtasks)
 
         return {
-            "num_subagents": torch.randint(1, 50, (batch_size,)),
+            "num_subagents": num_subagents,
             "trajectory_features": torch.randn(batch_size, feature_dim),
             "success": torch.bernoulli(torch.ones(batch_size) * 0.7),
             "training_step": 5000,
+            "completed_subtasks": completed_subtasks,
+            "assigned_subtasks": assigned_subtasks,
         }
 
     def test_initialization(self, reward_fn: PARLReward):
         """Test proper initialization of PARLReward"""
-        assert reward_fn.lambda_init == 0.1
-        assert reward_fn.lambda_final == 0.0
+        assert reward_fn.lambda1_init == 0.1
+        assert reward_fn.lambda1_final == 0.0
+        assert reward_fn.lambda2_init == 0.1
+        assert reward_fn.lambda2_final == 0.0
         assert reward_fn.total_training_steps == 10000
         assert reward_fn.device == "cpu"
         assert reward_fn.current_step == 0
 
     def test_anneal_lambda_start(self, reward_fn: PARLReward):
         """Test lambda annealing at the start of training"""
-        lambda_aux = reward_fn.anneal_lambda(0)
-        assert lambda_aux.item() == pytest.approx(0.1, rel=1e-5)
+        lambda1 = reward_fn.anneal_lambda1(0)
+        lambda2 = reward_fn.anneal_lambda2(0)
+        assert lambda1.item() == pytest.approx(0.1, rel=1e-5)
+        assert lambda2.item() == pytest.approx(0.1, rel=1e-5)
 
     def test_anneal_lambda_middle(self, reward_fn: PARLReward):
         """Test lambda annealing at the middle of training"""
-        lambda_aux = reward_fn.anneal_lambda(5000)
+        lambda1 = reward_fn.anneal_lambda1(5000)
         expected = 0.1 + (0.0 - 0.1) * 0.5  # Should be 0.05
-        assert lambda_aux.item() == pytest.approx(expected, rel=1e-5)
+        assert lambda1.item() == pytest.approx(expected, rel=1e-5)
 
     def test_anneal_lambda_end(self, reward_fn: PARLReward):
         """Test lambda annealing at the end of training"""
-        lambda_aux = reward_fn.anneal_lambda(10000)
-        assert lambda_aux.item() == pytest.approx(0.0, rel=1e-5)
+        lambda1 = reward_fn.anneal_lambda1(10000)
+        lambda2 = reward_fn.anneal_lambda2(10000)
+        assert lambda1.item() == pytest.approx(0.0, rel=1e-5)
+        assert lambda2.item() == pytest.approx(0.0, rel=1e-5)
 
     def test_anneal_lambda_beyond_end(self, reward_fn: PARLReward):
         """Test lambda annealing beyond training steps"""
-        lambda_aux = reward_fn.anneal_lambda(15000)
-        assert lambda_aux.item() == pytest.approx(0.0, rel=1e-5)
+        lambda1 = reward_fn.anneal_lambda1(15000)
+        assert lambda1.item() == pytest.approx(0.0, rel=1e-5)
 
     def test_instantiation_reward_shape(self, reward_fn: PARLReward):
         """Test instantiation reward output shape"""
@@ -111,6 +129,28 @@ class TestPARLReward:
         )
 
         assert r_parallel.item() == pytest.approx(1.0, rel=1e-5)
+
+    def test_finish_reward_shape(self, reward_fn: PARLReward):
+        """Test finish reward output shape"""
+        batch_size = 16
+        completed = torch.randint(0, 10, (batch_size,))
+        assigned = completed + torch.randint(1, 20, (batch_size,))
+        r_finish = reward_fn.compute_finish_reward(completed, assigned)
+        assert r_finish.shape == (batch_size,)
+
+    def test_finish_reward_range(self, reward_fn: PARLReward):
+        """Test finish reward is in [0, 1]"""
+        completed = torch.tensor([0, 5, 10])
+        assigned = torch.tensor([10, 10, 10])
+        r_finish = reward_fn.compute_finish_reward(completed, assigned)
+        assert torch.all(r_finish >= 0.0)
+        assert torch.all(r_finish <= 1.0)
+
+    def test_finish_reward_all_completed(self, reward_fn: PARLReward):
+        """Test finish reward is 1 when all subtasks completed"""
+        completed = assigned = torch.tensor([10, 20, 30])
+        r_finish = reward_fn.compute_finish_reward(completed, assigned)
+        assert torch.allclose(r_finish, torch.ones(3), atol=1e-5)
 
     def test_task_quality_shape(self, reward_fn: PARLReward):
         """Test task quality computation output shape"""
@@ -156,54 +196,53 @@ class TestPARLReward:
         r_parallel = reward_fn.compute_instantiation_reward(
             sample_data["num_subagents"]
         )
-        task_quality = reward_fn.compute_task_quality(
+        r_finish = reward_fn.compute_finish_reward(
+            sample_data["completed_subtasks"],
+            sample_data["assigned_subtasks"],
+        )
+        r_perf = reward_fn.compute_task_quality(
             sample_data["trajectory_features"], sample_data["success"]
         )
 
         reward = reward_fn.forward(
-            r_parallel,
-            sample_data["success"],
-            task_quality,
-            sample_data["training_step"],
+            r_parallel, r_finish, r_perf, sample_data["training_step"]
         )
 
         assert reward.shape == (batch_size,)
 
     def test_forward_early_training(self, reward_fn: PARLReward):
-        """Test reward emphasizes parallelism early in training"""
+        """Test reward has three terms early in training (λ1, λ2 > 0)"""
         batch_size = 4
 
-        # High parallelism, low task quality
         r_parallel = torch.tensor([1.0, 1.0, 1.0, 1.0])
-        success = torch.ones(batch_size)
-        task_quality = torch.tensor([0.1, 0.1, 0.1, 0.1])
+        r_finish = torch.tensor([0.8, 0.8, 0.8, 0.8])
+        r_perf = torch.tensor([0.1, 0.1, 0.1, 0.1])
 
-        reward = reward_fn.forward(r_parallel, success, task_quality, training_step=0)
+        reward = reward_fn.forward(
+            r_parallel, r_finish, r_perf, training_step=0
+        )
 
-        # At step 0, lambda_aux = 0.1, so parallelism should have significant weight
-        expected_parallel_component = 0.1 * 1.0
-        expected_task_component = 0.9 * 0.1
-        expected_reward = expected_parallel_component + expected_task_component
+        # At step 0, λ1=λ2=0.1: r_PARL = 0.1*1 + 0.1*0.8 + 0.1 = 0.28
+        expected_reward = 0.1 * 1.0 + 0.1 * 0.8 + 0.1
 
         assert torch.allclose(
             reward, torch.tensor([expected_reward] * batch_size), atol=1e-5
         )
 
     def test_forward_late_training(self, reward_fn: PARLReward):
-        """Test reward emphasizes task success late in training"""
+        """Test reward optimizes r_perf only late in training (λ1, λ2 = 0)"""
         batch_size = 4
 
-        # Low parallelism, high task quality
         r_parallel = torch.tensor([0.1, 0.1, 0.1, 0.1])
-        success = torch.ones(batch_size)
-        task_quality = torch.tensor([1.0, 1.0, 1.0, 1.0])
+        r_finish = torch.tensor([0.5, 0.5, 0.5, 0.5])
+        r_perf = torch.tensor([1.0, 1.0, 1.0, 1.0])
 
         reward = reward_fn.forward(
-            r_parallel, success, task_quality, training_step=10000
+            r_parallel, r_finish, r_perf, training_step=10000
         )
 
-        # At step 10000, lambda_aux = 0.0, so only task success matters
-        expected_reward = 1.0 * 1.0
+        # At step 10000, λ1=λ2=0: r_PARL = r_perf only
+        expected_reward = 1.0
 
         assert torch.allclose(
             reward, torch.tensor([expected_reward] * batch_size), atol=1e-5
@@ -216,32 +255,42 @@ class TestPARLReward:
             trajectory_features=sample_data["trajectory_features"],
             success=sample_data["success"],
             training_step=sample_data["training_step"],
+            completed_subtasks=sample_data["completed_subtasks"],
+            assigned_subtasks=sample_data["assigned_subtasks"],
         )
 
         assert "total_reward" in results
         assert "r_parallel" in results
-        assert "task_quality" in results
-        assert "lambda_aux" in results
+        assert "r_finish" in results
+        assert "r_perf" in results
+        assert "lambda1" in results
+        assert "lambda2" in results
         assert "instantiation_component" in results
+        assert "finish_component" in results
         assert "task_component" in results
 
         # Check shapes
         batch_size = sample_data["num_subagents"].shape[0]
         assert results["total_reward"].shape == (batch_size,)
         assert results["r_parallel"].shape == (batch_size,)
-        assert results["task_quality"].shape == (batch_size,)
+        assert results["r_finish"].shape == (batch_size,)
+        assert results["r_perf"].shape == (batch_size,)
 
     def test_reward_decomposition(self, reward_fn: PARLReward, sample_data: Dict):
-        """Test that reward components sum to total reward"""
+        """Test that reward components sum to total reward (λ1·r_parallel + λ2·r_finish + r_perf)"""
         results = reward_fn.compute_full_reward(
             num_subagents=sample_data["num_subagents"],
             trajectory_features=sample_data["trajectory_features"],
             success=sample_data["success"],
             training_step=sample_data["training_step"],
+            completed_subtasks=sample_data["completed_subtasks"],
+            assigned_subtasks=sample_data["assigned_subtasks"],
         )
 
         reconstructed_reward = (
-            results["instantiation_component"] + results["task_component"]
+            results["instantiation_component"]
+            + results["finish_component"]
+            + results["task_component"]
         )
 
         assert torch.allclose(results["total_reward"], reconstructed_reward, atol=1e-5)
@@ -309,24 +358,23 @@ class TestPARLReward:
 
     def test_batch_consistency(self, reward_fn: PARLReward):
         """Test that batch processing gives same results as individual processing"""
-        # Create single samples
         single_samples = [
             {
                 "num_subagents": torch.tensor([i * 10]),
                 "trajectory_features": torch.randn(1, 64),
                 "success": torch.tensor([1.0]),
                 "training_step": 5000,
+                "completed_subtasks": torch.tensor([i * 5]),
+                "assigned_subtasks": torch.tensor([i * 10]),
             }
-            for i in range(5)
+            for i in range(1, 6)
         ]
 
-        # Process individually
         individual_rewards = []
         for sample in single_samples:
             result = reward_fn.compute_full_reward(**sample)
             individual_rewards.append(result["total_reward"])
 
-        # Process as batch
         batch_data = {
             "num_subagents": torch.cat([s["num_subagents"] for s in single_samples]),
             "trajectory_features": torch.cat(
@@ -334,15 +382,32 @@ class TestPARLReward:
             ),
             "success": torch.cat([s["success"] for s in single_samples]),
             "training_step": 5000,
+            "completed_subtasks": torch.cat(
+                [s["completed_subtasks"] for s in single_samples]
+            ),
+            "assigned_subtasks": torch.cat(
+                [s["assigned_subtasks"] for s in single_samples]
+            ),
         }
 
         batch_results = reward_fn.compute_full_reward(**batch_data)
-
-        # Compare
         individual_stacked = torch.cat(individual_rewards)
         assert torch.allclose(
             batch_results["total_reward"], individual_stacked, atol=1e-5
         )
+
+    def test_compute_full_reward_backward_compat(self, reward_fn: PARLReward):
+        """Test compute_full_reward without completed/assigned_subtasks (r_finish=1)"""
+        results = reward_fn.compute_full_reward(
+            num_subagents=torch.tensor([10, 20]),
+            trajectory_features=torch.randn(2, 64),
+            success=torch.ones(2),
+            training_step=1000,
+        )
+        assert "total_reward" in results
+        assert "r_finish" in results
+        assert results["r_finish"].shape == (2,)
+        assert torch.allclose(results["r_finish"], torch.ones(2), atol=1e-5)
 
 
 class TestCriticalStepsMetric:

@@ -12,46 +12,53 @@ This document provides detailed API documentation for the PARL (Parallel-Agent R
 ## PARLReward
 
 ```python
-class parl.PARLReward(lambda_init=0.1, lambda_final=0.0, total_training_steps=10000, device='cpu')
+class parl.PARLReward(lambda1_init=0.1, lambda1_final=0.0, lambda2_init=0.1, lambda2_final=0.0, total_training_steps=10000, device='cpu', *, lambda_init=None, lambda_final=None)
 ```
 
-Parallel-Agent Reinforcement Learning Reward Function implementing staged reward shaping.
+Parallel-Agent Reinforcement Learning Reward Function (Kimi K2.5 technical report).
 
-The `PARLReward` class implements a two-component reward structure that encourages parallelism early in training and gradually shifts focus toward task success. The reward function follows the formulation:
+The `PARLReward` class implements the three-term PARL reward:
 
 ```math
-R_t = λ_aux(e) · r_parallel + (1 - λ_aux(e)) · (𝟙[success] · Q(τ))
+r_PARL(x,y) = λ1·r_parallel + λ2·r_finish + r_perf(x,y)
 ```
 
 where:
-- `λ_aux(e)` anneals linearly from `lambda_init` to `lambda_final` over `total_training_steps`
-- `r_parallel` is the instantiation reward encouraging parallelism
-- `𝟙[success]` is a binary success indicator
-- `Q(τ)` is the end-to-end task quality metric
+- **r_parallel**: Instantiation reward (mitigates serial collapse; encourages subagent instantiation).
+- **r_finish**: Sub-agent finish rate (prevents spurious parallelism; rewards completed subtasks).
+- **r_perf(x,y)**: Task-level outcome (evaluates success and quality of solution y for task x).
+- **λ1 and λ2** anneal linearly to zero over training so the final policy optimizes r_perf.
+
+For backward compatibility, you can pass `lambda_init` and `lambda_final` (keyword-only) to set both λ1 and λ2.
 
 ### Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `lambda_init` | `float` | `0.1` | Initial auxiliary reward weight. Controls how much weight is placed on parallelism incentive at the start of training. Typical values range from 0.05 to 0.2. |
-| `lambda_final` | `float` | `0.0` | Final auxiliary reward weight. Usually set to 0.0 to fully focus on task success by the end of training. |
-| `total_training_steps` | `int` | `10000` | Total number of training steps over which lambda anneals. This determines the annealing schedule. |
-| `device` | `str` | `'cpu'` | Device for tensor computation. Must be `'cpu'` or `'cuda'`. All internal tensors will be created on this device. |
+| `lambda1_init` | `float` | `0.1` | Initial λ1 (for r_parallel). Anneals to `lambda1_final`. |
+| `lambda1_final` | `float` | `0.0` | Final λ1. |
+| `lambda2_init` | `float` | `0.1` | Initial λ2 (for r_finish). Anneals to `lambda2_final`. |
+| `lambda2_final` | `float` | `0.0` | Final λ2. |
+| `total_training_steps` | `int` | `10000` | Steps over which λ1 and λ2 anneal. |
+| `device` | `str` | `'cpu'` | Device for tensor computation. |
+| `lambda_init` | `float` \| `None` | `None` | (Keyword-only.) If set, used as both λ1 and λ2 initial values. |
+| `lambda_final` | `float` \| `None` | `None` | (Keyword-only.) If set, used as both λ1 and λ2 final values. |
 
 ### Attributes
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `lambda_init` | `float` | Initial lambda value (read-only). |
-| `lambda_final` | `float` | Final lambda value (read-only). |
-| `total_training_steps` | `int` | Total training steps (read-only). |
-| `device` | `str` | Computation device (read-only). |
+| `lambda1_init`, `lambda1_final` | `float` | λ1 annealing range. |
+| `lambda2_init`, `lambda2_final` | `float` | λ2 annealing range. |
+| `lambda_init`, `lambda_final` | `float` | Backward compat (equal to λ1). |
+| `total_training_steps` | `int` | Total training steps. |
+| `device` | `str` | Computation device. |
 
 ### Methods
 
-#### `anneal_lambda(training_step)`
+#### `anneal_lambda1(training_step)` / `anneal_lambda2(training_step)`
 
-Computes the current value of λ_aux based on training progress.
+Compute the current λ1 (for r_parallel) or λ2 (for r_finish) based on training progress. `anneal_lambda(training_step)` is backward compatibility and returns λ1.
 
 **Parameters:**
 
@@ -68,10 +75,10 @@ Computes the current value of λ_aux based on training progress.
 **Mathematical Formulation:**
 
 ```math
-λ_aux(e) = λ_init + (λ_final - λ_init) · min(1.0, e / total_training_steps)
+λ1(e) = λ1_init + (λ1_final - λ1_init) · min(1.0, e / total_training_steps)
 ```
 
-where `e` is the current training step.
+and similarly for λ2. Here `e` is the current training step.
 
 **Example:**
 
@@ -145,13 +152,23 @@ print(r_parallel)
 # tensor([0.1000, 0.2500, 0.5000, 1.0000])
 ```
 
-**Note:** The reward increases linearly with the number of subagents, encouraging the model to spawn more parallel agents.
+**Note:** The reward increases with the number of subagents, encouraging exploration of concurrent scheduling (mitigates serial collapse).
+
+---
+
+#### `compute_finish_reward(completed_subtasks, assigned_subtasks, eps=1e-8)`
+
+Computes **r_finish**: sub-agent finish rate (reward for completed subtasks). Prevents spurious parallelism (spawning many subagents without meaningful decomposition). Rewards completed subtasks to enforce feasibility.
+
+**Parameters:** `completed_subtasks` (batch_size,), `assigned_subtasks` (batch_size,), optional `eps` to avoid division by zero.
+
+**Returns:** Finish reward in [0, 1] (batch_size,). Formula: `completed_subtasks / (assigned_subtasks + eps)` clamped to [0, 1].
 
 ---
 
 #### `compute_task_quality(trajectory_features, success_indicators)`
 
-Computes the end-to-end task quality metric `Q(τ)`.
+Computes **r_perf**: task-level outcome (success and quality of solution y for task x).
 
 **Parameters:**
 
@@ -202,29 +219,25 @@ print(task_quality)
 
 ---
 
-#### `forward(r_parallel, success, task_quality, training_step)`
+#### `forward(r_parallel, r_finish, r_perf, training_step)`
 
-Computes the full PARL reward using the staged reward shaping formula.
+Computes the full PARL reward: r_PARL = λ1·r_parallel + λ2·r_finish + r_perf.
 
 **Parameters:**
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `r_parallel` | `torch.Tensor` | Instantiation reward values. Shape: `(batch_size,)`. Typically computed via `compute_instantiation_reward()`. |
-| `success` | `torch.Tensor` | Binary success indicators. Shape: `(batch_size,)`. |
-| `task_quality` | `torch.Tensor` | Task quality scores. Shape: `(batch_size,)`. Typically computed via `compute_task_quality()`. |
-| `training_step` | `int` | Current training step for lambda annealing. |
+| `r_parallel` | `torch.Tensor` | Instantiation reward (batch_size,). |
+| `r_finish` | `torch.Tensor` | Finish reward (batch_size,). From `compute_finish_reward()`. |
+| `r_perf` | `torch.Tensor` | Task-level outcome (batch_size,). From `compute_task_quality()`. |
+| `training_step` | `int` | Current training step for λ1/λ2 annealing. |
 
-**Returns:**
-
-| Type | Description |
-|------|-------------|
-| `torch.Tensor` | Total reward values. Shape: `(batch_size,)`. |
+**Returns:** Total reward (batch_size,).
 
 **Mathematical Formulation:**
 
 ```math
-R_t = λ_aux(e) · r_parallel + (1 - λ_aux(e)) · (success · Q(τ))
+r_PARL = λ1(e)·r_parallel + λ2(e)·r_finish + r_perf
 ```
 
 **Example:**
@@ -242,26 +255,26 @@ reward_fn = PARLReward(
 
 # Pre-computed components
 r_parallel = torch.tensor([0.5, 0.3, 0.8])
-success = torch.tensor([1.0, 1.0, 0.0])
-task_quality = torch.tensor([0.9, 0.7, 0.6])
+r_finish = torch.tensor([0.9, 0.8, 0.7])
+r_perf = torch.tensor([0.9, 0.7, 0.6])
 training_step = 5000  # Mid-training
 
 total_reward = reward_fn.forward(
     r_parallel=r_parallel,
-    success=success,
-    task_quality=task_quality,
+    r_finish=r_finish,
+    r_perf=r_perf,
     training_step=training_step
 )
 
 print(total_reward)
-# tensor([0.4750, 0.3650, 0.0400])
+# At step 5000, λ1=λ2=0.05: e.g. tensor([0.97, 0.775, 0.635])
 ```
 
 **Note:** This method is typically called internally by `compute_full_reward()`. Use `compute_full_reward()` for most use cases as it computes all components automatically.
 
 ---
 
-#### `compute_full_reward(num_subagents, trajectory_features, success, training_step, max_subagents=100)`
+#### `compute_full_reward(num_subagents, trajectory_features, success, training_step, max_subagents=100, completed_subtasks=None, assigned_subtasks=None)`
 
 Computes all reward components in a single pass. This is the recommended method for most use cases.
 
@@ -269,28 +282,28 @@ Computes all reward components in a single pass. This is the recommended method 
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `num_subagents` | `torch.Tensor` | Number of subagents instantiated per episode. Shape: `(batch_size,)`. |
-| `trajectory_features` | `torch.Tensor` | Trajectory features. Shape: `(batch_size, feature_dim)`. |
-| `success` | `torch.Tensor` | Binary success indicators. Shape: `(batch_size,)`. |
-| `training_step` | `int` | Current training step for lambda annealing. |
+| `num_subagents` | `torch.Tensor` | Number of subagents instantiated (batch_size,). |
+| `trajectory_features` | `torch.Tensor` | Trajectory features (batch_size, feature_dim). |
+| `success` | `torch.Tensor` | Binary success indicators (batch_size,). |
+| `training_step` | `int` | Current training step for λ1/λ2 annealing. |
 | `max_subagents` | `int` | Maximum allowed subagents. Default: `100`. |
+| `completed_subtasks` | `torch.Tensor` \| `None` | Subtasks completed (batch_size,). If None, r_finish=1 (all assigned completed). |
+| `assigned_subtasks` | `torch.Tensor` \| `None` | Subtasks assigned (batch_size,). If None, set to num_subagents. |
 
-**Returns:**
-
-| Type | Description |
-|------|-------------|
-| `dict` | Dictionary containing all reward components with the following keys: |
-
-**Return Dictionary:**
+**Returns:** `dict` with:
 
 | Key | Type | Shape | Description |
 |-----|------|-------|-------------|
-| `total_reward` | `torch.Tensor` | `(batch_size,)` | Total PARL reward combining parallelism and task success components. |
-| `r_parallel` | `torch.Tensor` | `(batch_size,)` | Instantiation reward (parallelism component). |
-| `task_quality` | `torch.Tensor` | `(batch_size,)` | Task quality scores Q(τ). |
-| `lambda_aux` | `torch.Tensor` | `()` | Current lambda value (scalar). |
-| `instantiation_component` | `torch.Tensor` | `(batch_size,)` | λ_aux · r_parallel (parallelism contribution to total reward). |
-| `task_component` | `torch.Tensor` | `(batch_size,)` | (1 - λ_aux) · success · Q(τ) (task success contribution to total reward). |
+| `total_reward` | `torch.Tensor` | `(batch_size,)` | r_PARL = λ1·r_parallel + λ2·r_finish + r_perf. |
+| `r_parallel` | `torch.Tensor` | `(batch_size,)` | Instantiation reward. |
+| `r_finish` | `torch.Tensor` | `(batch_size,)` | Finish reward. |
+| `r_perf` | `torch.Tensor` | `(batch_size,)` | Task-level outcome. |
+| `lambda1`, `lambda2` | `torch.Tensor` | `()` | Current λ1, λ2. |
+| `instantiation_component` | `torch.Tensor` | `(batch_size,)` | λ1 · r_parallel. |
+| `finish_component` | `torch.Tensor` | `(batch_size,)` | λ2 · r_finish. |
+| `task_component` | `torch.Tensor` | `(batch_size,)` | r_perf. |
+| `task_quality` | `torch.Tensor` | `(batch_size,)` | Alias for r_perf. |
+| `lambda_aux` | `torch.Tensor` | `()` | Backward compat (same as λ1). |
 
 **Example:**
 
@@ -350,8 +363,9 @@ CriticalSteps = Σ_t (S_main^(t) + max_i S_sub,i^(t))
 ```
 
 where:
-- `S_main^(t)` is the orchestration overhead at stage `t`
-- `S_sub,i^(t)` is the execution time of subagent `i` at stage `t`
+- **S_main^(t)** is the number of steps taken by the main agent in stage t (typically 1)
+- **S_sub,i^(t)** is the number of steps taken by the i-th subagent in that parallel group
+- The duration of stage t is governed by the longest-running subagent in that cohort
 - `max_i` finds the slowest subagent at each stage (the critical path)
 - `Σ_t` sums across all stages
 

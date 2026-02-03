@@ -4,9 +4,12 @@ PARL: Parallel-Agent Reinforcement Learning
 A training paradigm that teaches models to decompose complex tasks into parallel
 subtasks and coordinate multiple agents simultaneously.
 
+Reward (per Kimi K2.5 report): r_PARL = λ1·r_parallel + λ2·r_finish + r_perf.
+λ1, λ2 anneal to zero so the final policy optimizes r_perf.
+
 This package provides:
-- PARLReward: Staged reward shaping function for parallel agent training
-- CriticalStepsMetric: Latency-oriented evaluation metric
+- PARLReward: Three-term reward (r_parallel, r_finish, r_perf) with λ1/λ2 annealing
+- CriticalStepsMetric: Critical steps = Σ_t (S_main^(t) + max_i S_sub,i^(t))
 
 Example:
     >>> import torch

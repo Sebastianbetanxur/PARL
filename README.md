@@ -42,27 +42,31 @@ PARL is a training methodology that addresses the critical challenge of **serial
 
 ## Reward Function
 
-PARL implements a two-component reward structure:
+PARL implements the three-term reward from the Kimi K2.5 technical report:
 
 ```
-R_t = λ_aux(e) · r_parallel + (1 - λ_aux(e)) · (𝟙[success] · Q(τ))
+r_PARL(x,y) = λ1·r_parallel + λ2·r_finish + r_perf(x,y)
 ```
 
 Where:
-- `λ_aux(e)`: Anneals from 0.1 → 0.0 over training
-- `r_parallel`: Instantiation reward encouraging parallelism
-- `𝟙[success]`: Binary success indicator
-- `Q(τ)`: End-to-end task quality metric
+- **r_parallel** (instantiation reward): Incentivizes subagent instantiation; mitigates serial collapse.
+- **r_finish** (sub-agent finish rate): Rewards completed subtasks; prevents spurious parallelism (spawning many subagents without meaningful decomposition).
+- **r_perf(x,y)** (task-level outcome): Evaluates overall success and quality of solution y for task x.
+- **λ1 and λ2**: Annealed to zero over training so the final policy optimizes r_perf.
 
 ### Critical Steps Metric
 
-Instead of counting total steps, PARL uses a latency-oriented metric:
+Per the paper, total critical steps are defined as:
 
 ```
-CriticalSteps = Σ(S_main^(t) + max_i S_sub,i^(t))
+CriticalSteps = Σ_t (S_main^(t) + max_i S_sub,i^(t))
 ```
 
-This metric captures the true execution time considering parallel operations.
+- **S_main^(t)**: Steps taken by the main agent in stage t (typically 1).
+- **S_sub,i^(t)**: Steps taken by the i-th subagent in that parallel group.
+- The duration of stage t is governed by the longest-running subagent in that cohort.
+
+This metric captures the true execution time (critical path) and incentivizes effective parallelization.
 
 ## Installation
 
@@ -86,30 +90,34 @@ reward_fn = PARLReward(
 )
 
 # Prepare episode data
-num_subagents = torch.tensor([25, 30, 40])  # Number of subagents per episode
-trajectory_features = torch.randn(3, 64)     # Trajectory features
-success = torch.tensor([1.0, 1.0, 0.0])      # Success indicators
-training_step = 5000                          # Current training step
+num_subagents = torch.tensor([25, 30, 40])
+completed_subtasks = torch.tensor([20, 28, 35])  # Completed subtasks
+assigned_subtasks = torch.tensor([25, 30, 40])   # Assigned subtasks
+trajectory_features = torch.randn(3, 64)
+success = torch.tensor([1.0, 1.0, 0.0])
+training_step = 5000
 
-# Compute rewards
+# Compute rewards (completed_subtasks/assigned_subtasks optional; default r_finish=1)
 rewards = reward_fn.compute_full_reward(
     num_subagents=num_subagents,
     trajectory_features=trajectory_features,
     success=success,
     training_step=training_step,
-    max_subagents=100
+    max_subagents=100,
+    completed_subtasks=completed_subtasks,
+    assigned_subtasks=assigned_subtasks,
 )
 
 print(f"Total Reward: {rewards['total_reward']}")
-print(f"Lambda (λ_aux): {rewards['lambda_aux']:.4f}")
-print(f"Parallelism Component: {rewards['instantiation_component']}")
-print(f"Task Success Component: {rewards['task_component']}")
+print(f"λ1 (r_parallel): {rewards['lambda1']:.4f}, λ2 (r_finish): {rewards['lambda2']:.4f}")
+print(f"Instantiation: {rewards['instantiation_component']}")
+print(f"Finish: {rewards['finish_component']}, Task: {rewards['task_component']}")
 
-# Evaluate using Critical Steps metric
+# Evaluate using Critical Steps metric (S_main typically 1 per stage)
 critical_steps_metric = CriticalStepsMetric()
 
-main_steps = torch.ones(3, 5) * 0.1  # Orchestration overhead
-sub_steps = torch.rand(3, 5, 10)      # Subagent steps
+main_steps = torch.ones(3, 5)  # Main agent steps per stage (typically 1)
+sub_steps = torch.rand(3, 5, 10)
 
 critical_steps = critical_steps_metric(main_steps, sub_steps)
 print(f"Critical Steps: {critical_steps}")

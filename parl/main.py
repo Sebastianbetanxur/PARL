@@ -1,18 +1,24 @@
 """
 PARL Reward Function Implementation in PyTorch
 
-Implements the staged reward shaping from the paper:
-R_t = λ_aux(e) · r_parallel + (1 - λ_aux(e)) · (𝟙[success] · Q(τ))
+Implements the PARL reward from the Kimi K2.5 technical report:
 
-where λ_aux(e) anneals from 0.1 → 0.0 over training.
+    r_PARL(x,y) = λ1·r_parallel + λ2·r_finish + r_perf(x,y)
+
+where:
+- r_parallel: instantiation reward (mitigates serial collapse)
+- r_finish: sub-agent finish rate (prevents spurious parallelism)
+- r_perf(x,y): task-level outcome (evaluates success and quality of solution)
+- λ1 and λ2 are annealed to zero over training so the final policy optimizes r_perf
 
 Requirements:
     pip install torch
 
 This implementation provides:
-- Staged reward shaping with lambda annealing
+- Three-term reward with λ1, λ2 annealing
 - Instantiation reward (r_parallel) to encourage parallelism
-- Task quality computation Q(τ)
+- Finish reward (r_finish) to reward completed subtasks
+- Task-level performance (r_perf)
 - Critical Steps metric for latency evaluation
 - Differentiable components for gradient-based optimization
 """
@@ -25,45 +31,58 @@ class PARLReward(nn.Module):
     """
     Parallel-Agent Reinforcement Learning Reward Function
 
-    Implements staged reward shaping that:
-    1. Encourages parallelism early in training (via r_parallel)
-    2. Gradually shifts focus toward task success (via Q(τ))
+    Implements the PARL reward:
+    1. r_parallel: incentivizes subagent instantiation (mitigates serial collapse)
+    2. r_finish: rewards completed subtasks (prevents spurious parallelism)
+    3. r_perf: task-level outcome (primary objective; λ1, λ2 anneal to 0 so this dominates)
     """
 
     def __init__(
         self,
-        lambda_init: float = 0.1,
-        lambda_final: float = 0.0,
+        lambda1_init: float = 0.1,
+        lambda1_final: float = 0.0,
+        lambda2_init: float = 0.1,
+        lambda2_final: float = 0.0,
         total_training_steps: int = 10000,
         device: str = "cpu",
+        *,
+        lambda_init: float | None = None,
+        lambda_final: float | None = None,
     ):
         super().__init__()
+        # Backward compatibility: lambda_init / lambda_final set both λ1 and λ2
+        if lambda_init is not None:
+            lambda1_init = lambda2_init = lambda_init
+        if lambda_final is not None:
+            lambda1_final = lambda2_final = lambda_final
 
-        self.lambda_init = lambda_init
-        self.lambda_final = lambda_final
+        self.lambda1_init = lambda1_init
+        self.lambda1_final = lambda1_final
+        self.lambda2_init = lambda2_init
+        self.lambda2_final = lambda2_final
         self.total_training_steps = total_training_steps
         self.device = device
 
-        # Register lambda as a buffer (not a trainable parameter)
+        self.lambda_init = lambda1_init
+        self.lambda_final = lambda1_final
+
         self.register_buffer("current_step", torch.tensor(0, dtype=torch.long))
 
-    def anneal_lambda(self, training_step: int) -> torch.Tensor:
-        """
-        Anneal λ_aux from 0.1 → 0.0 over training
-
-        Args:
-            training_step: Current training step
-
-        Returns:
-            Current λ_aux value as a tensor
-        """
+    def anneal_lambda1(self, training_step: int) -> torch.Tensor:
+        """Anneal λ1 from init → final over training (for r_parallel)."""
         progress = min(1.0, training_step / self.total_training_steps)
+        lam = self.lambda1_init + (self.lambda1_final - self.lambda1_init) * progress
+        return torch.tensor(lam, dtype=torch.float32, device=self.device)
 
-        lambda_aux = (
-            self.lambda_init + (self.lambda_final - self.lambda_init) * progress
-        )
+    def anneal_lambda2(self, training_step: int) -> torch.Tensor:
+        """Anneal λ2 from init → final over training (for r_finish)."""
+        progress = min(1.0, training_step / self.total_training_steps)
+        lam = self.lambda2_init + (self.lambda2_final - self.lambda2_init) * progress
+        return torch.tensor(lam, dtype=torch.float32, device=self.device)
 
-        return torch.tensor(lambda_aux, dtype=torch.float32, device=self.device)
+    def anneal_lambda(self, training_step: int) -> torch.Tensor:
+        """Backward compatibility: returns λ1 (same as anneal_lambda1)."""
+        return self.anneal_lambda1(training_step)
 
     def compute_instantiation_reward(
         self, num_subagents: torch.Tensor, max_subagents: int = 100
@@ -78,31 +97,46 @@ class PARLReward(nn.Module):
         Returns:
             Instantiation reward (batch_size,)
         """
-        # Normalize by max capacity
         normalized_count = num_subagents.float() / max_subagents
+        return normalized_count.clamp(0.0, 1.0)
 
-        # Reward increases with parallelism
-        r_parallel = normalized_count
+    def compute_finish_reward(
+        self,
+        completed_subtasks: torch.Tensor,
+        assigned_subtasks: torch.Tensor,
+        eps: float = 1e-8,
+    ) -> torch.Tensor:
+        """
+        Compute r_finish: sub-agent finish rate (reward for completed subtasks).
 
-        return r_parallel
+        Prevents spurious parallelism: spawning many subagents without meaningful
+        task decomposition. Rewards completed subtasks to enforce feasibility and
+        guide the policy toward valid decompositions.
+
+        Args:
+            completed_subtasks: Number of subtasks completed (batch_size,)
+            assigned_subtasks: Number of subtasks assigned (batch_size,)
+            eps: Small constant to avoid division by zero
+
+        Returns:
+            Finish reward in [0, 1] (batch_size,)
+        """
+        rate = completed_subtasks.float() / (assigned_subtasks.float() + eps)
+        return rate.clamp(0.0, 1.0)
 
     def compute_task_quality(
         self, trajectory_features: torch.Tensor, success_indicators: torch.Tensor
     ) -> torch.Tensor:
         """
-        Compute Q(τ): end-to-end task quality
+        Compute r_perf: task-level outcome (success and quality of solution y for task x).
 
         Args:
             trajectory_features: Features extracted from trajectory (batch_size, feature_dim)
             success_indicators: Binary success indicators (batch_size,)
 
         Returns:
-            Task quality scores (batch_size,)
+            Task-level performance in [0, 1] (batch_size,)
         """
-        # In practice, this could be a learned quality function
-        # For now, we use a simple weighted combination
-
-        # Base quality from trajectory features (could be learned)
         quality = trajectory_features.mean(dim=-1)
 
         # Modulate by success
@@ -113,35 +147,19 @@ class PARLReward(nn.Module):
     def forward(
         self,
         r_parallel: torch.Tensor,
-        success: torch.Tensor,
-        task_quality: torch.Tensor,
+        r_finish: torch.Tensor,
+        r_perf: torch.Tensor,
         training_step: int,
     ) -> torch.Tensor:
         """
         Compute the full PARL reward:
-        R_t = λ_aux(e) · r_parallel + (1 - λ_aux(e)) · (𝟙[success] · Q(τ))
+        r_PARL(x,y) = λ1·r_parallel + λ2·r_finish + r_perf
 
-        Args:
-            r_parallel: Instantiation reward (batch_size,)
-            success: Success indicators (batch_size,)
-            task_quality: Task quality scores (batch_size,)
-            training_step: Current training step
-
-        Returns:
-            Total reward (batch_size,)
+        λ1 and λ2 are annealed to zero over training so the final policy optimizes r_perf.
         """
-        # Anneal lambda based on training progress
-        lambda_aux = self.anneal_lambda(training_step)
-
-        # Instantiation reward component (encourages parallelism)
-        instantiation_reward = lambda_aux * r_parallel
-
-        # Task-level outcome component (encourages success)
-        task_outcome = (1.0 - lambda_aux) * (success.float() * task_quality)
-
-        # Total reward
-        total_reward = instantiation_reward + task_outcome
-
+        lambda1 = self.anneal_lambda1(training_step)
+        lambda2 = self.anneal_lambda2(training_step)
+        total_reward = lambda1 * r_parallel + lambda2 * r_finish + r_perf
         return total_reward
 
     def compute_full_reward(
@@ -151,9 +169,11 @@ class PARLReward(nn.Module):
         success: torch.Tensor,
         training_step: int,
         max_subagents: int = 100,
+        completed_subtasks: torch.Tensor | None = None,
+        assigned_subtasks: torch.Tensor | None = None,
     ) -> dict:
         """
-        Compute all reward components in one pass
+        Compute all reward components in one pass.
 
         Args:
             num_subagents: Number of subagents instantiated (batch_size,)
@@ -161,60 +181,72 @@ class PARLReward(nn.Module):
             success: Success indicators (batch_size,)
             training_step: Current training step
             max_subagents: Maximum allowed subagents
+            completed_subtasks: Number of subtasks completed (batch_size,). If None, set to assigned_subtasks so r_finish=1.
+            assigned_subtasks: Number of subtasks assigned (batch_size,). If None, set to num_subagents.
 
         Returns:
-            Dictionary with all reward components
+            Dictionary with total_reward, r_parallel, r_finish, r_perf, λ1, λ2, and components.
         """
-        # Compute individual components
         r_parallel = self.compute_instantiation_reward(num_subagents, max_subagents)
-        task_quality = self.compute_task_quality(trajectory_features, success)
+        r_perf = self.compute_task_quality(trajectory_features, success)
 
-        # Compute total reward
-        total_reward = self.forward(r_parallel, success, task_quality, training_step)
+        _assigned = (
+            assigned_subtasks if assigned_subtasks is not None else num_subagents
+        )
+        _completed = (
+            completed_subtasks if completed_subtasks is not None else _assigned
+        )
+        r_finish = self.compute_finish_reward(_completed, _assigned)
+
+        total_reward = self.forward(r_parallel, r_finish, r_perf, training_step)
+        lambda1 = self.anneal_lambda1(training_step)
+        lambda2 = self.anneal_lambda2(training_step)
 
         return {
             "total_reward": total_reward,
             "r_parallel": r_parallel,
-            "task_quality": task_quality,
-            "lambda_aux": self.anneal_lambda(training_step),
-            "instantiation_component": self.anneal_lambda(training_step) * r_parallel,
-            "task_component": (1.0 - self.anneal_lambda(training_step))
-            * success.float()
-            * task_quality,
+            "r_finish": r_finish,
+            "r_perf": r_perf,
+            "lambda1": lambda1,
+            "lambda2": lambda2,
+            "instantiation_component": lambda1 * r_parallel,
+            "finish_component": lambda2 * r_finish,
+            "task_component": r_perf,
+            "task_quality": r_perf,
+            "lambda_aux": lambda1,
         }
 
 
 class CriticalStepsMetric(nn.Module):
     """
-    Critical Steps metric for latency-oriented evaluation
+    Critical Steps metric for latency-oriented evaluation.
 
-    CriticalSteps = Σ(S_main^(t) + max_i S_sub,i^(t))
+    Per the paper: total critical steps = Σ_t (S_main^(t) + max_i S_sub,i^(t)).
+    S_main^(t) is the number of steps taken by the main agent in stage t (typically 1).
+    S_sub,i^(t) is the number of steps taken by the i-th subagent in that parallel group.
+    The duration of stage t is governed by the longest-running subagent in that cohort.
     """
 
     def __init__(self, orchestration_overhead: float = 0.1):
         super().__init__()
+        # Reserved for future use; pass main_steps in forward (typically 1 per stage).
         self.orchestration_overhead = orchestration_overhead
 
     def forward(
         self, main_steps: torch.Tensor, sub_steps: torch.Tensor
     ) -> torch.Tensor:
         """
-        Compute critical steps
+        Compute critical steps: Σ_t (S_main^(t) + max_i S_sub,i^(t)).
 
         Args:
-            main_steps: Orchestration overhead at each stage (batch_size, num_stages)
-            sub_steps: Subagent steps at each stage (batch_size, num_stages, num_subagents)
+            main_steps: Main agent steps per stage (batch_size, num_stages). Typically 1 per stage.
+            sub_steps: Subagent steps per stage (batch_size, num_stages, num_subagents). For stages with no subagents, use zeros (max_i = 0).
 
         Returns:
             Total critical steps (batch_size,)
         """
-        # For each stage, find the slowest subagent
-        max_sub_steps, _ = sub_steps.max(dim=-1)  # (batch_size, num_stages)
-
-        # Add orchestration overhead
+        max_sub_steps = sub_steps.max(dim=-1).values
+        # When a stage has no subagents (size 0), max is -inf; treat as 0
+        max_sub_steps = max_sub_steps.clamp(min=0.0)
         critical_steps_per_stage = main_steps + max_sub_steps
-
-        # Sum across stages
-        total_critical_steps = critical_steps_per_stage.sum(dim=-1)
-
-        return total_critical_steps
+        return critical_steps_per_stage.sum(dim=-1)
